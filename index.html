@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#122d58">
+  <title>FilBrit Live QR Scanner</title>
+  <style>
+    :root{--navy:#122d58;--blue:#244da9;--ink:#182742;--muted:#62718a;--bg:#eef3fb;--red:#a42b42;--green:#14734e}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+    body{min-height:100vh;display:flex;flex-direction:column}.top{background:var(--navy);color:#fff;padding:18px 20px}.top strong{font-size:22px;letter-spacing:.8px}.top span{display:block;color:#cdd9ee;font-size:13px;margin-top:3px}
+    main{width:min(680px,100%);margin:0 auto;padding:18px;flex:1}.card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 14px 50px #122d5817}.status{font-weight:700;margin:4px 0 14px}.help{font-size:14px;color:var(--muted);margin:10px 0}.error{color:var(--red)}.ok{color:var(--green)}
+    #reader{width:100%;overflow:hidden;border-radius:14px;background:#101820;min-height:320px}#reader video{object-fit:cover!important;border-radius:14px}
+    button{width:100%;min-height:52px;border:0;border-radius:12px;padding:12px 16px;font:inherit;font-weight:750;background:var(--blue);color:white;margin-top:14px}button.secondary{background:white;color:var(--ink);border:1px solid #cbd6e7}.footer{font-size:12px;color:var(--muted);padding:14px 4px;text-align:center}
+    .scanline{margin-top:12px;padding:10px 12px;border-radius:10px;background:#f5f8ff;color:#39537f;font-size:13px}
+  </style>
+</head>
+<body>
+  <header class="top"><strong>FILBRIT · Live QR Scanner</strong><span id="eventName">Event entrance</span></header>
+  <main>
+    <div class="card">
+      <div class="status" id="status">Preparing camera…</div>
+      <div id="reader"></div>
+      <p class="help">Point the rear camera at the participant's FilBrit group QR. The scanner reads it automatically — no photo or shutter button is needed.</p>
+      <button id="startBtn" type="button" hidden>Start camera</button>
+      <button id="cancelBtn" type="button" class="secondary">Cancel / return</button>
+      <div class="scanline" id="detail">For the first use on each phone, choose <strong>Allow camera</strong> when the browser asks. Keep the browser session open during the event.</div>
+    </div>
+    <div class="footer">Camera access is used only on this scanner page. The scanned QR is sent back to the FilBrit check-in tab.</div>
+  </main>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <script>
+  (()=>{
+    'use strict';
+    const qs=new URLSearchParams(location.search);
+    const targetOrigin=qs.get('targetOrigin')||'';
+    const returnUrl=qs.get('returnUrl')||'';
+    const eventName=qs.get('eventName')||'Event entrance';
+    const status=document.getElementById('status'),startBtn=document.getElementById('startBtn'),cancelBtn=document.getElementById('cancelBtn');
+    document.getElementById('eventName').textContent=eventName;
+    let scanner=null,running=false,done=false;
+    const setStatus=(text,kind='')=>{status.textContent=text;status.className='status'+(kind?' '+kind:'');};
+    const token=value=>{let v=String(value||'').trim();try{const u=new URL(v);v=u.searchParams.get('t')||v;}catch(e){const m=v.match(/[?&]t=([^&#]+)/);if(m)try{v=decodeURIComponent(m[1]);}catch(_){} }const m2=String(v).match(/FB-[A-F0-9]{32}/i);return m2?m2[0].toUpperCase():'';};
+    async function stop(){if(scanner&&running){try{await scanner.stop();}catch(e){}running=false;}try{scanner&&scanner.clear();}catch(e){}}
+    async function deliver(decoded){if(done)return;done=true;setStatus('QR detected — opening participant group…','ok');await stop();const payload={type:'FILBRIT_QR',value:String(decoded||'')};let sent=false;
+      try{if(window.opener&&!window.opener.closed&&targetOrigin){window.opener.postMessage(payload,targetOrigin);sent=true;}}catch(e){}
+      if(sent){setTimeout(()=>{try{window.close();}catch(e){}},120);setTimeout(()=>{if(!window.closed&&returnUrl){const t=token(decoded);if(t)location.replace(returnUrl+(returnUrl.includes('?')?'&':'?')+'t='+encodeURIComponent(t));}},700);return;}
+      const t=token(decoded);if(returnUrl&&t){location.replace(returnUrl+(returnUrl.includes('?')?'&':'?')+'t='+encodeURIComponent(t));return;}
+      setStatus('QR read, but the FilBrit check-in tab could not be reached.','error');document.getElementById('detail').textContent=String(decoded||'');startBtn.hidden=false;startBtn.textContent='Scan another QR';done=false;
+    }
+    async function start(){if(running||done)return;if(typeof Html5Qrcode!=='function'){setStatus('Scanner library could not load. Check the internet connection and reload.','error');startBtn.hidden=false;return;}
+      startBtn.hidden=true;setStatus('Starting rear camera…');try{
+        scanner=new Html5Qrcode('reader',{formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE],useBarCodeDetectorIfSupported:true});
+        const config={fps:12,qrbox:(w,h)=>{const side=Math.max(190,Math.min(320,Math.floor(Math.min(w,h)*0.72)));return {width:side,height:side};},aspectRatio:1.333334,disableFlip:false};
+        try{await scanner.start({facingMode:{exact:'environment'}},config,deliver,()=>{});}catch(first){await scanner.start({facingMode:'environment'},config,deliver,()=>{});}running=true;setStatus('Camera ready — point it at the QR.','ok');
+      }catch(err){running=false;const msg=String(err&&err.message||err||'');setStatus('Camera could not start. Tap Start camera and allow camera access when prompted.','error');document.getElementById('detail').textContent=msg||'Camera permission was denied or no supported camera was found.';startBtn.hidden=false;try{scanner&&scanner.clear();}catch(e){}scanner=null;}
+    }
+    startBtn.addEventListener('click',()=>{done=false;start();});
+    cancelBtn.addEventListener('click',async()=>{await stop();try{window.close();}catch(e){}if(!window.closed&&returnUrl)location.replace(returnUrl);});
+    window.addEventListener('pagehide',()=>{stop();});
+    setTimeout(start,120);
+  })();
+  </script>
+</body>
+</html>
